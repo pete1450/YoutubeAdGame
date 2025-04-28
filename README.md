@@ -1,7 +1,7 @@
 # 3D Scrolling Shooter
 ![alt text](image.png)
 
-Minimalist representation of that scam youtube ad game. Copilot writwe the whole thing, including the rest of this readme. I changed one line of code.
+Minimalist representation of that scam youtube ad game. Copilot wrote the whole thing, including the rest of this readme. I changed one line of code.
 
 ## How to Play
 
