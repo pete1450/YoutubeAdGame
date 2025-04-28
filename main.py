@@ -38,11 +38,13 @@ projectile_speed = 7
 projectiles = []  # Each projectile is [x, y, normalized_x]  # Modified to store normalized x position
 
 # Enemy settings
-ENEMY_BASE_WIDTH = 30
-ENEMY_BASE_HEIGHT = 30
-enemy_speed = 2  # Reduced from 4 to 2 to make enemies slower
-enemies = []
+ENEMY_BASE_WIDTH = 40  # Increased from 30
+ENEMY_BASE_HEIGHT = 40  # Increased from 30
+enemy_speed = 1
+enemies = []  # Regular enemies: [normalized_x, y]
+boss_enemies = []  # Boss enemies: [normalized_x, y, health]
 spawn_rate = 60
+boss_spawn_chance = 0.05  # 5% chance when spawning enemies
 
 # Powerup settings
 POWERUP_BASE_WIDTH = 50   # Increased from 25 to take up more space
@@ -75,7 +77,7 @@ def reset_game():
 def get_scale_factor(y_pos):
     # Objects appear larger when closer (lower y value = further away)
     distance = (y_pos - HORIZON_Y) / (WINDOW_HEIGHT - HORIZON_Y)
-    return max(0.2, min(1.0, distance))
+    return max(0.4, min(1.0, distance))  # Increased minimum scale from 0.2 to 0.4
 
 def get_x_position_on_road(normalized_x, y_pos):
     # Convert a normalized x position (0-1) to actual x position based on perspective
@@ -111,8 +113,15 @@ def draw_road():
     pygame.draw.polygon(screen, DARK_GRAY, right_barrier_points)
 
 def spawn_enemy():
-    # Create a cluster of enemies
-    cluster_size = random.randint(2, 5)  # Random number of enemies in cluster
+    # Chance to spawn a boss enemy instead of regular enemies
+    if random.random() < boss_spawn_chance:
+        normalized_x = random.random()
+        health = random.randint(10, 100)
+        boss_enemies.append([normalized_x, HORIZON_Y, health])
+        return
+
+    # Regular enemy cluster spawning
+    cluster_size = random.randint(3, 12)  # Increased from 2-10 to 3-12 enemies per cluster
     cluster_spread = 0.2  # How spread out the cluster is horizontally
     
     # Choose a center point for the cluster
@@ -227,6 +236,7 @@ def draw_projectiles():
         pygame.draw.rect(screen, WHITE, (perspective_x - width//2, y - height//2, width, height))
 
 def draw_enemies():
+    # Draw regular enemies
     for enemy in enemies:
         normalized_x, y = enemy
         x = get_x_position_on_road(normalized_x, y)
@@ -234,6 +244,24 @@ def draw_enemies():
         width = ENEMY_BASE_WIDTH * scale
         height = ENEMY_BASE_HEIGHT * scale
         pygame.draw.rect(screen, WHITE, (x - width//2, y - height//2, width, height))
+
+    # Draw boss enemies
+    for boss in boss_enemies:
+        normalized_x, y, health = boss
+        x = get_x_position_on_road(normalized_x, y)
+        scale = get_scale_factor(y)
+        width = ENEMY_BASE_WIDTH * scale * 4  # Increased from 2 to 4 times larger
+        height = ENEMY_BASE_HEIGHT * scale * 4
+        
+        # Draw boss enemy
+        pygame.draw.rect(screen, RED, (x - width//2, y - height//2, width, height))
+        
+        # Draw health number
+        font_size = max(20, int(width * 0.4))
+        health_font = pygame.font.Font(None, font_size)
+        health_text = health_font.render(str(health), True, WHITE)
+        text_rect = health_text.get_rect(center=(x, y))
+        screen.blit(health_text, text_rect)
 
 def draw_powerups():
     for powerup in powerups:
@@ -265,8 +293,10 @@ def draw_powerups():
         powerup[3] = (flash_timer + 1) % (flash_speed * 2)  # Update flash timer
 
 def check_collision(x1, y1, w1, h1, x2, y2, w2, h2):
-    return (x1 < x2 + w2 and x1 + w1 > x2 and
-            y1 < y2 + h2 and y1 + h1 > y2)
+    # Add a small buffer to make collisions more forgiving
+    buffer = 5
+    return (x1 < x2 + w2 + buffer and x1 + w1 + buffer > x2 and
+            y1 < y2 + h2 + buffer and y1 + h1 + buffer > y2)
 
 def update_enemy_position(enemy, target_x):
     normalized_x, y = enemy
@@ -470,6 +500,9 @@ while running:
                         if instances_placed + instances_in_ring > player_instances:
                             instances_in_ring = player_instances - instances_placed
                         
+                        if instances_in_ring <= 0:  # Skip rings with no instances
+                            continue
+                            
                         ring_angle_step = 2 * math.pi / instances_in_ring
                         
                         for i in range(instances_in_ring):
@@ -477,11 +510,12 @@ while running:
                             # Calculate offset from base position
                             offset_x = ring_radius * math.cos(angle)
                             offset_y = ring_radius * math.sin(angle) * 0.3
-                            instance_x = player_x + offset_x
+                            
+                            x = player_x + offset_x
                             instance_y = player_y + offset_y
                             
                             if check_collision(
-                                instance_x - (PLAYER_WIDTH * player_scale)//2, instance_y - (PLAYER_HEIGHT * player_scale)//2,
+                                x - (PLAYER_WIDTH * player_scale)//2, instance_y - (PLAYER_HEIGHT * player_scale)//2,
                                 PLAYER_WIDTH * player_scale, PLAYER_HEIGHT * player_scale,
                                 enemy_x - enemy_width//2, y - enemy_height//2,
                                 enemy_width, enemy_height):
@@ -491,6 +525,117 @@ while running:
                                     game_state = GAME_STATE_GAME_OVER
                                 collision_detected = True
                                 break
+
+        # Update boss enemies and check collisions
+        for boss in boss_enemies[:]:
+            normalized_x, y, health = boss
+            # Update y position with perspective-based speed
+            speed_scale = 1 + (y - HORIZON_Y) / (WINDOW_HEIGHT - HORIZON_Y)  # Moves faster when closer
+            boss[1] += enemy_speed * speed_scale * 0.7  # Boss moves slightly slower
+            
+            # Update x position to move towards player
+            current_x = get_x_position_on_road(normalized_x, y)
+            dx = player_x - current_x
+            road_width = ROAD_WIDTH_BOTTOM - (ROAD_WIDTH_BOTTOM - ROAD_WIDTH_TOP) * ((WINDOW_HEIGHT - y) / (WINDOW_HEIGHT - HORIZON_Y))
+            movement_scale = 0.005  # Boss moves more slowly horizontally
+            normalized_movement = (dx / road_width) * movement_scale
+            boss[0] = max(0, min(1, normalized_x + normalized_movement))
+            
+            if y > WINDOW_HEIGHT:
+                boss_enemies.remove(boss)
+                continue
+
+            boss_scale = get_scale_factor(y)
+            boss_width = ENEMY_BASE_WIDTH * boss_scale * 4  # Increased from 2 to 4 times larger
+            boss_height = ENEMY_BASE_HEIGHT * boss_scale * 4
+            boss_x = get_x_position_on_road(normalized_x, y)
+
+            # Check collision with projectiles
+            for proj in projectiles[:]:
+                proj_x, proj_y, proj_normalized_x = proj
+                proj_scale = get_scale_factor(proj_y)
+                proj_width = PROJECTILE_BASE_WIDTH * proj_scale
+                proj_height = PROJECTILE_BASE_HEIGHT * proj_scale
+                
+                if check_collision(
+                    proj_x - proj_width//2, proj_y - proj_height//2,
+                    proj_width, proj_height,
+                    boss_x - boss_width//2, y - boss_height//2,
+                    boss_width, boss_height):
+                    if proj in projectiles:
+                        projectiles.remove(proj)
+                        boss[2] -= 1  # Decrease health by 1
+                        if boss[2] <= 0:  # Boss is defeated
+                            boss_enemies.remove(boss)
+                            score += 50  # More points for defeating a boss
+                    break
+
+            # Check collision with player (if boss still alive)
+            if boss in boss_enemies:
+                player_scale = get_scale_factor(player_y)
+                # Similar player collision code as with regular enemies
+                if player_instances == 1:
+                    if check_collision(
+                        player_x - (PLAYER_WIDTH * player_scale)//2, player_y - (PLAYER_HEIGHT * player_scale)//2,
+                        PLAYER_WIDTH * player_scale, PLAYER_HEIGHT * player_scale,
+                        boss_x - boss_width//2, y - boss_height//2,
+                        boss_width, boss_height):
+                        player_instances -= health  # Remove instances equal to boss health
+                        boss_enemies.remove(boss)
+                        if player_instances <= 0:
+                            game_state = GAME_STATE_GAME_OVER
+                else:
+                    # Check collision with instances in concentric rings
+                    max_ring = math.ceil(math.sqrt(player_instances))
+                    instances_placed = 0
+                    collision_detected = False
+                    
+                    for ring in range(max_ring):
+                        if collision_detected:
+                            break
+                            
+                        ring_radius = player_circle_radius * (ring + 1) / max_ring
+                        if ring == max_ring - 1:
+                            instances_in_ring = player_instances - instances_placed
+                        else:
+                            instances_in_ring = min(math.floor(2 * math.pi * ring_radius / (PLAYER_WIDTH * player_scale * 1.5)),
+                                                  player_instances - instances_placed)
+                        
+                        if instances_placed + instances_in_ring > player_instances:
+                            instances_in_ring = player_instances - instances_placed
+                        
+                        if instances_in_ring <= 0:  # Skip rings with no instances
+                            continue
+                            
+                        ring_angle_step = 2 * math.pi / instances_in_ring
+                        
+                        for i in range(instances_in_ring):
+                            if collision_detected:
+                                break
+                                
+                            # Calculate instance position and size
+                            angle = ring_angle_step * i
+                            offset_x = ring_radius * math.cos(angle)
+                            offset_y = ring_radius * math.sin(angle) * 0.3
+                            instance_x = player_x + offset_x
+                            instance_y = player_y + offset_y
+                            
+                            instance_width = PLAYER_WIDTH * player_scale
+                            instance_height = PLAYER_HEIGHT * player_scale
+                            
+                            if check_collision(
+                                instance_x - (PLAYER_WIDTH * player_scale)//2, instance_y - (PLAYER_HEIGHT * player_scale)//2,
+                                PLAYER_WIDTH * player_scale, PLAYER_HEIGHT * player_scale,
+                                boss_x - boss_width//2, y - boss_height//2,
+                                boss_width, boss_height):
+                                player_instances -= health
+                                boss_enemies.remove(boss)
+                                if player_instances <= 0:
+                                    game_state = GAME_STATE_GAME_OVER
+                                collision_detected = True
+                                break
+                            
+                        instances_placed += instances_in_ring
 
         # Update powerups and check collisions
         for powerup in powerups[:]:
@@ -513,11 +658,13 @@ while running:
             
             # Check collision with player instances
             collision_detected = False  # Add flag to track if powerup was collected
+            player_scale = get_scale_factor(player_y)  # Get player's correct scale
+            
             if player_instances == 1:
                 # Check collision with single centered instance
                 if check_collision(
-                    player_x - (PLAYER_WIDTH * powerup_scale)//2, player_y - (PLAYER_HEIGHT * powerup_scale)//2,
-                    PLAYER_WIDTH * powerup_scale, PLAYER_HEIGHT * powerup_scale,
+                    player_x - (PLAYER_WIDTH * player_scale)//2, player_y - (PLAYER_HEIGHT * player_scale)//2,
+                    PLAYER_WIDTH * player_scale, PLAYER_HEIGHT * player_scale,
                     powerup_x - powerup_width//2, y - powerup_height//2,
                     powerup_width, powerup_height):
                     new_instances = max(1, player_instances + value)
@@ -538,13 +685,13 @@ while running:
                     if ring == max_ring - 1:
                         instances_in_ring = player_instances - instances_placed
                     else:
-                        instances_in_ring = min(math.floor(2 * math.pi * ring_radius / (PLAYER_WIDTH * powerup_scale * 1.5)),
+                        instances_in_ring = min(math.floor(2 * math.pi * ring_radius / (PLAYER_WIDTH * player_scale * 1.5)),
                                               player_instances - instances_placed)
                     
                     if instances_placed + instances_in_ring > player_instances:
                         instances_in_ring = player_instances - instances_placed
-                    
-                    if instances_in_ring <= 0:  # Skip empty rings
+                        
+                    if instances_in_ring <= 0:  # Skip rings with no instances
                         continue
                         
                     ring_angle_step = 2 * math.pi / instances_in_ring
@@ -553,15 +700,19 @@ while running:
                         if collision_detected:  # Break inner loop if collision already detected
                             break
                             
+                        # Calculate instance position and size
                         angle = ring_angle_step * i
                         offset_x = ring_radius * math.cos(angle)
                         offset_y = ring_radius * math.sin(angle) * 0.3
                         instance_x = player_x + offset_x
                         instance_y = player_y + offset_y
                         
+                        instance_width = PLAYER_WIDTH * player_scale
+                        instance_height = PLAYER_HEIGHT * player_scale
+                        
                         if check_collision(
-                            instance_x - (PLAYER_WIDTH * powerup_scale)//2, instance_y - (PLAYER_HEIGHT * powerup_scale)//2,
-                            PLAYER_WIDTH * powerup_scale, PLAYER_HEIGHT * powerup_scale,
+                            instance_x - (PLAYER_WIDTH * player_scale)//2, instance_y - (PLAYER_HEIGHT * player_scale)//2,
+                            PLAYER_WIDTH * player_scale, PLAYER_HEIGHT * player_scale,
                             powerup_x - powerup_width//2, y - powerup_height//2,
                             powerup_width, powerup_height):
                             new_instances = max(1, player_instances + value)
