@@ -1,6 +1,7 @@
 # 3D Scrolling Shooter
 ![alt text](image.png)
-A retro-style pseudo-3D scrolling shooter game where you control multiple player instances and face waves of enemies and challenging boss encounters.
+
+Minimalist representation of that scam youtube ad game. Copilot wrote the whole thing, including the rest of this readme. I changed one line of code.
 
 ## How to Play
 
